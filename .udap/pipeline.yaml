@@ -19,13 +19,24 @@ stages:
   - name: Compile Puppet catalog (noop)
     run: |
       # `parser validate` only checks SYNTAX. It does NOT evaluate the manifest,
-      # so unknown variables (e.g. an unescaped nginx $uri in a heredoc) and
-      # duplicate resource declarations sail past it and only fail on the host.
-      # A --noop apply compiles the full catalog and changes nothing, catching
-      # that class here in seconds instead of after provisioning an instance.
-      # Exit 0 = no changes, 2 = changes would be made; both mean it compiled.
+      # so unknown variables (an unescaped nginx $uri in a heredoc) and duplicate
+      # resource declarations sail past it and only fail on the host. A --noop
+      # apply compiles the full catalog and changes nothing, catching that class
+      # here in seconds instead of after provisioning an instance.
+      #
+      # Puppet resolves a file resource's `source` DURING EVALUATION, in noop
+      # too — it has to, to decide whether a change would be made. So the runner
+      # needs the same layout the host gets from the configure stage's scp,
+      # otherwise File[/var/www/site] fails with "Could not retrieve information
+      # from ... file:///tmp/udap-deploy/site" and noop exits 4.
+      rm -rf /tmp/udap-deploy
+      mkdir -p /tmp/udap-deploy
+      cp -r puppet site /tmp/udap-deploy/
+
+      # Strict: 0 = no changes, 2 = changes would be made. Anything else
+      # (1 = error, 4/6 = resource failures) fails the stage.
       sudo /opt/puppetlabs/bin/puppet apply --noop --detailed-exitcodes \
-        puppet/manifests/site.pp
+        /tmp/udap-deploy/puppet/manifests/site.pp
       rc=$?
       test $rc -eq 0 -o $rc -eq 2
   - name: Check site content exists
