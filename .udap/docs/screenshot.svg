@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360" viewBox="0 0 640 360">
+  <rect width="640" height="360" fill="#0b0f1a"/>
+  <rect x="0" y="0" width="640" height="44" fill="#111827"/>
+  <circle cx="22" cy="22" r="6" fill="#ef4444"/>
+  <circle cx="42" cy="22" r="6" fill="#f59e0b"/>
+  <circle cx="62" cy="22" r="6" fill="#22c55e"/>
+  <rect x="90" y="12" width="380" height="20" rx="10" fill="#1f2937"/>
+  <rect x="32" y="76" width="576" height="120" rx="14" fill="#111827" stroke="#a78bfa" stroke-width="1.5"/>
+  <text x="56" y="126" font-family="Menlo, monospace" font-size="26" fill="#f9fafb">Static Website</text>
+  <text x="56" y="160" font-family="Menlo, monospace" font-size="14" fill="#9ca3af">nginx · EC2 · zero lock-in</text>
+  <rect x="32" y="216" width="180" height="96" rx="12" fill="#111827"/>
+  <rect x="228" y="216" width="180" height="96" rx="12" fill="#111827"/>
+  <rect x="424" y="216" width="184" height="96" rx="12" fill="#111827"/>
+  <text x="52" y="252" font-family="Menlo, monospace" font-size="12" fill="#6b7280">status</text>
+  <text x="52" y="284" font-family="Menlo, monospace" font-size="20" fill="#a78bfa">healthy</text>
+  <text x="248" y="252" font-family="Menlo, monospace" font-size="12" fill="#6b7280">deploys</text>
+  <text x="248" y="284" font-family="Menlo, monospace" font-size="20" fill="#f9fafb">green</text>
+  <text x="444" y="252" font-family="Menlo, monospace" font-size="12" fill="#6b7280">endpoint</text>
+  <text x="444" y="284" font-family="Menlo, monospace" font-size="20" fill="#f9fafb">/health</text>
+</svg>

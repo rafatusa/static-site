@@ -1,0 +1,10 @@
+# udap:meta cloud=aws region=us-east-1 target=ec2
+
+user: User { udap-type: generic.user }
+eip: Elastic IP { udap-type: aws.eip }
+vpc: VPC {
+  web: Web Server (nginx, Ubuntu 22.04) { udap-type: aws.ec2 }
+}
+
+user -> eip: HTTP :80
+eip -> vpc.web: static address
