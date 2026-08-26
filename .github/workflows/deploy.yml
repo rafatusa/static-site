@@ -16,6 +16,15 @@ jobs:
         \ apt-get update\nsudo apt-get install -y puppet-agent\n"
     - name: Validate Puppet manifest syntax
       run: /opt/puppetlabs/bin/puppet parser validate puppet/manifests/site.pp
+    - name: Compile Puppet catalog (noop)
+      run: "# `parser validate` only checks SYNTAX. It does NOT evaluate the manifest,\n\
+        # so unknown variables (e.g. an unescaped nginx $uri in a heredoc) and\n#\
+        \ duplicate resource declarations sail past it and only fail on the host.\n\
+        # A --noop apply compiles the full catalog and changes nothing, catching\n\
+        # that class here in seconds instead of after provisioning an instance.\n\
+        # Exit 0 = no changes, 2 = changes would be made; both mean it compiled.\n\
+        sudo /opt/puppetlabs/bin/puppet apply --noop --detailed-exitcodes \\\n  puppet/manifests/site.pp\n\
+        rc=$?\ntest $rc -eq 0 -o $rc -eq 2\n"
     - name: Check site content exists
       run: 'test -f site/index.html
 

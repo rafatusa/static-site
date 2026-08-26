@@ -30,9 +30,8 @@ package { 'nginx':
 # Puppet normalises the trailing slash and aborts the whole run.
 #
 # recurse + purge means files deleted from site/ in git also disappear here.
-# mode governs FILES (0644); directories need the traverse bit, so they are
-# set separately via source_permissions/0755 — a flat 0644 would strip +x from
-# the directory itself and nginx would return 403 on every request.
+# mode governs FILES (0644); the exec below restores the traverse bit on
+# directories, which a flat 0644 would strip (nginx would 403 every request).
 file { $site_root:
   ensure       => directory,
   source       => "${deploy_root}/site",
@@ -42,7 +41,6 @@ file { $site_root:
   owner        => 'root',
   group        => 'root',
   mode         => '0644',
-  # Directories inside the tree keep the execute bit so nginx can traverse them.
   recurselimit => 5,
   require      => Package['nginx'],
   notify       => Service['nginx'],
@@ -56,12 +54,20 @@ exec { 'site-root-dir-perms':
   require     => File[$site_root],
 }
 
+# HEREDOC ESCAPE SWITCHES — /$L, not /L.
+#   $  = allow \$ to mean a LITERAL dollar sign
+#   L  = allow \<newline> line continuation
+# The tag is double-quoted ("VHOST") so ${site_root} interpolates as a Puppet
+# variable — which is exactly what we want. But nginx's own $uri must survive
+# as literal text. Without the $ switch, \$uri is NOT unescaped, Puppet reads
+# it as a variable named 'uri', and evaluation dies with
+# "Unknown variable: 'uri'". That is what failed the first deploy.
 file { $nginx_vhost:
   ensure  => file,
   owner   => 'root',
   group   => 'root',
   mode    => '0644',
-  content => @("VHOST"/L),
+  content => @("VHOST"/$L),
     server {
       listen 80 default_server;
       listen [::]:80 default_server;
