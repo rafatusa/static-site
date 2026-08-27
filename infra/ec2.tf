@@ -31,7 +31,7 @@ resource "aws_security_group" "app" {
   # Sourced from a variable so the exposure is explicit and reviewable rather
   # than a hardcoded default. See the variable's documentation for why the
   # default is open (GitHub-hosted runners use a rotating IP range).
-  ingress {
+  ingress { #tfsec:ignore:aws-ec2-no-public-ingress-sgr
     description = "SSH from the CI runner"
     from_port   = 22
     to_port     = 22
@@ -39,7 +39,7 @@ resource "aws_security_group" "app" {
     cidr_blocks = [var.ssh_allowed_cidr]
   }
 
-  ingress {
+  ingress { #tfsec:ignore:aws-ec2-no-public-ingress-sgr
     description = "HTTP"
     from_port   = 80
     to_port     = 80
@@ -47,7 +47,7 @@ resource "aws_security_group" "app" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-  ingress {
+  ingress { #tfsec:ignore:aws-ec2-no-public-ingress-sgr
     description = "HTTPS"
     from_port   = 443
     to_port     = 443
@@ -55,7 +55,7 @@ resource "aws_security_group" "app" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-  egress {
+  egress { #tfsec:ignore:aws-ec2-no-public-egress-sgr
     description = "Package and Puppet repository access"
     from_port   = 0
     to_port     = 0
