@@ -25,6 +25,28 @@ describe 'static-site node', type: :host do
     is_expected.to compile
   end
 
+  # VACUOUS-PASS GUARD. Read this before touching the fixture layout.
+  #
+  # A catalog that loaded NO manifest still compiles successfully — it is simply
+  # empty. Every other example then fails with "expected that the catalogue
+  # would contain ...", and the coverage report prints "Total resources: 0,
+  # Resource coverage: 100.00%", which SATISFIES the 90% floor. That exact
+  # combination has already occurred on this project: a coverage gate that can
+  # pass while asserting nothing is worse than no gate, because it is trusted.
+  #
+  # This asserts the environment actually loaded site.pp, and names the fixture
+  # layout as the cause when it fails, so the diagnosis does not cost a CI round.
+  it 'loads the real manifest (catalog is not empty)' do
+    count = catalogue.resources.reject { |r| r.type == 'Class' && r.title == 'main' }.size
+
+    expect(count).to be >= MINIMUM_EXPECTED_RESOURCES,
+                     "catalog has #{count} resources (expected >= " \
+                     "#{MINIMUM_EXPECTED_RESOURCES}). The fixture environment did " \
+                     'not load puppet/manifests/site.pp — check ' \
+                     'spec/fixtures/production/environment.conf and the site.pp link. ' \
+                     'The manifest did not shrink; the environment is empty.'
+  end
+
   describe 'nginx package' do
     it 'installs nginx' do
       is_expected.to contain_package('nginx').with_ensure('installed')

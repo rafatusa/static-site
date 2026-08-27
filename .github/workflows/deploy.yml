@@ -80,27 +80,22 @@ jobs:
         \ silently move to 6.x\n# and break the harness again on a future run.\nsudo\
         \ /opt/puppetlabs/puppet/bin/gem install --no-document \\\n  'rspec-puppet:~>\
         \ 5.0' rspec\n"
-    - name: Report the rspec-puppet configuration API
-      run: "# DIAGNOSTIC, not a gate \u2014 always exits 0.\n#\n# This harness has\
-        \ now broken twice on removed RSpec.configure attributes\n# (manifest_dir=,\
-        \ then environment=), each discovered one CI round at a\n# time. Printing\
-        \ the gem's ACTUAL settable configuration surface means a\n# third mismatch\
-        \ is diagnosed from one log instead of another round trip.\nsudo -E /opt/puppetlabs/puppet/bin/ruby\
-        \ -e '\n  require \"rspec-puppet\"\n  api = RSpec::Puppet::Setup rescue nil\n\
-        \  settable = RSpec::Core::Configuration.instance_methods.grep(/=$/).sort\n\
-        \  puppet_settable = settable.select { |m|\n    m.to_s =~ /manifest|environment|module|fact|hiera|strict|trusted|adapter/\n\
-        \  }\n  puts \"rspec-puppet version: #{Gem.loaded_specs[\"rspec-puppet\"]&.version}\"\
-        \n  puts \"puppet version:       #{Gem.loaded_specs[\"puppet\"]&.version}\"\
-        \n  puts \"--- puppet-related RSpec.configure setters available ---\"\n  puppet_settable.each\
-        \ { |m| puts \"  #{m}\" }\n' || true\n"
     - name: Run Puppet unit tests with coverage
       run: "# rspec-puppet compiles the catalog in-process and asserts on the\n# resulting\
         \ resources. It fails the build below the coverage floor\n# configured in\
-        \ spec/spec_helper.rb (90% of declared resources).\n#\n# Run under sudo with\
-        \ the vendored ruby: the gems were installed into\n# the root-owned gem home\
-        \ above, so the same interpreter must load them.\n# -E preserves the environment;\
-        \ the binary path is absolute regardless.\nsudo -E /opt/puppetlabs/puppet/bin/ruby\
-        \ \\\n  /opt/puppetlabs/puppet/bin/rspec --format documentation\n"
+        \ spec/spec_helper.rb (90% of declared resources), and\n# spec/hosts/site_spec.rb\
+        \ fails the run outright if the catalog came back\n# empty \u2014 an empty\
+        \ catalog reports 100% coverage of zero resources and\n# would otherwise pass\
+        \ the floor while asserting nothing.\n#\n# The path argument is REQUIRED,\
+        \ not cosmetic. A bare `rspec` runs the\n# whole spec/ tree; an obsolete spec\
+        \ left behind by a rename then executes\n# alongside the real suite and fails\
+        \ on an API it was never updated for.\n# Scoping to spec/hosts means only\
+        \ the maintained suite ever runs.\n#\n# Run under sudo with the vendored ruby:\
+        \ the gems were installed into\n# the root-owned gem home above, so the same\
+        \ interpreter must load them.\n# -E preserves the environment; the binary\
+        \ path is absolute regardless.\nsudo -E /opt/puppetlabs/puppet/bin/ruby \\\
+        \n  /opt/puppetlabs/puppet/bin/rspec \\\n  --default-path spec \\\n  --format\
+        \ documentation \\\n  spec/hosts\n"
   security:
     runs-on: ubuntu-latest
     needs:

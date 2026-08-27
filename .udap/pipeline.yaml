@@ -102,37 +102,28 @@ stages:
       # and break the harness again on a future run.
       sudo /opt/puppetlabs/puppet/bin/gem install --no-document \
         'rspec-puppet:~> 5.0' rspec
-  - name: Report the rspec-puppet configuration API
-    run: |
-      # DIAGNOSTIC, not a gate — always exits 0.
-      #
-      # This harness has now broken twice on removed RSpec.configure attributes
-      # (manifest_dir=, then environment=), each discovered one CI round at a
-      # time. Printing the gem's ACTUAL settable configuration surface means a
-      # third mismatch is diagnosed from one log instead of another round trip.
-      sudo -E /opt/puppetlabs/puppet/bin/ruby -e '
-        require "rspec-puppet"
-        api = RSpec::Puppet::Setup rescue nil
-        settable = RSpec::Core::Configuration.instance_methods.grep(/=$/).sort
-        puppet_settable = settable.select { |m|
-          m.to_s =~ /manifest|environment|module|fact|hiera|strict|trusted|adapter/
-        }
-        puts "rspec-puppet version: #{Gem.loaded_specs["rspec-puppet"]&.version}"
-        puts "puppet version:       #{Gem.loaded_specs["puppet"]&.version}"
-        puts "--- puppet-related RSpec.configure setters available ---"
-        puppet_settable.each { |m| puts "  #{m}" }
-      ' || true
   - name: Run Puppet unit tests with coverage
     run: |
       # rspec-puppet compiles the catalog in-process and asserts on the
       # resulting resources. It fails the build below the coverage floor
-      # configured in spec/spec_helper.rb (90% of declared resources).
+      # configured in spec/spec_helper.rb (90% of declared resources), and
+      # spec/hosts/site_spec.rb fails the run outright if the catalog came back
+      # empty — an empty catalog reports 100% coverage of zero resources and
+      # would otherwise pass the floor while asserting nothing.
+      #
+      # The path argument is REQUIRED, not cosmetic. A bare `rspec` runs the
+      # whole spec/ tree; an obsolete spec left behind by a rename then executes
+      # alongside the real suite and fails on an API it was never updated for.
+      # Scoping to spec/hosts means only the maintained suite ever runs.
       #
       # Run under sudo with the vendored ruby: the gems were installed into
       # the root-owned gem home above, so the same interpreter must load them.
       # -E preserves the environment; the binary path is absolute regardless.
       sudo -E /opt/puppetlabs/puppet/bin/ruby \
-        /opt/puppetlabs/puppet/bin/rspec --format documentation
+        /opt/puppetlabs/puppet/bin/rspec \
+        --default-path spec \
+        --format documentation \
+        spec/hosts
 - id: security
   kind: security
   needs:
