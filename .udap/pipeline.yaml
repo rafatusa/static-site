@@ -96,10 +96,9 @@ stages:
       # `gem install` dies with Gem::FilePermissionError before installing
       # anything (same root cause as the lint stage's puppet-lint install).
       #
-      # PIN the major version. rspec-puppet 4 REMOVED `manifest_dir=` and
-      # `manifest=`; spec/spec_helper.rb is written against the 5.x
-      # environmentpath API. An unpinned install would silently move to 6.x
-      # and break the harness again on a future run.
+      # PIN the major version. rspec-puppet 4 REMOVED `manifest_dir=` (but NOT
+      # `manifest=`, which spec/spec_helper.rb depends on). An unpinned install
+      # would silently move to 6.x and break the harness again on a future run.
       sudo /opt/puppetlabs/puppet/bin/gem install --no-document \
         'rspec-puppet:~> 5.0' rspec
   - name: Run Puppet unit tests with coverage
@@ -132,6 +131,23 @@ stages:
   steps:
   - name: Secret scan (gitleaks)
     run: |
+      # ┌──────────────────────────────────────────────────────────────────┐
+      # │ REPORT-ONLY BY EXPLICIT USER DIRECTION (2026-08-27).             │
+      # │                                                                  │
+      # │ The user asked for the security stage to be kept but to stop     │
+      # │ failing the pipeline, INCLUDING on CRITICAL findings. The agent   │
+      # │ advised against this and proposed per-finding triage with        │
+      # │ targeted, commented suppressions instead; the user chose         │
+      # │ report-only anyway. Recorded as a deliberate exception, not as   │
+      # │ an engineering fix.                                              │
+      # │                                                                  │
+      # │ CONSEQUENCE: no security finding of ANY severity — including a   │
+      # │ committed credential or a new CRITICAL introduced later — will   │
+      # │ block a deploy. The scanners are an audit log, not a gate.       │
+      # │ Restore blocking by removing the `|| true` from each scanner and │
+      # │ re-adding the --exit-code 1 / --minimum-severity HIGH pass.      │
+      # └──────────────────────────────────────────────────────────────────┘
+      #
       # Full history, not just the working tree — a credential removed in a
       # later commit is still published in the pack.
       VERSION=8.21.2
@@ -140,26 +156,29 @@ stages:
         -o /tmp/gitleaks.tar.gz
       tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
       sudo install /tmp/gitleaks /usr/local/bin/gitleaks
-      gitleaks detect --source . --redact --verbose --exit-code 1
+
+      echo "=== gitleaks: secret scan (REPORT ONLY — does not fail the build) ==="
+      gitleaks detect --source . --redact --verbose --exit-code 0 || true
   - name: IaC security scan (tfsec)
     run: |
-      # Policy: HIGH and CRITICAL fail the build. MEDIUM/LOW are printed for
-      # review but do not block — a Tier-1 single-instance static site legitimately
-      # trips some of them (e.g. SSH open to the runner's rotating IP range),
-      # and blanket-suppressing findings to reach zero would weaken the gate.
+      # REPORT ONLY by user direction — see the banner in the gitleaks step.
+      # Since nothing blocks, the OUTPUT is the entire value of this step, so
+      # every finding is printed in full at every severity. A stage that reports
+      # a count instead of a cause is worthless to whoever reads it later.
       VERSION=1.28.13
       curl -fsSL --retry 3 \
         "https://github.com/aquasecurity/tfsec/releases/download/v${VERSION}/tfsec-linux-amd64" \
         -o /tmp/tfsec
       sudo install /tmp/tfsec /usr/local/bin/tfsec
 
-      echo "--- full findings (informational) ---"
-      tfsec infra --soft-fail
+      echo "=== tfsec: ALL findings, all severities (REPORT ONLY) ==="
+      tfsec infra --soft-fail --include-passed=false
 
-      echo "--- blocking findings (HIGH/CRITICAL) ---"
-      tfsec infra --minimum-severity HIGH
+      echo "=== tfsec: CRITICAL/HIGH detail (REPORT ONLY — NOT blocking) ==="
+      tfsec infra --soft-fail --minimum-severity HIGH --format json
   - name: Filesystem and IaC scan (trivy)
     run: |
+      # REPORT ONLY by user direction — see the banner in the gitleaks step.
       VERSION=0.58.1
       curl -fsSL --retry 3 \
         "https://github.com/aquasecurity/trivy/releases/download/v${VERSION}/trivy_${VERSION}_Linux-64bit.tar.gz" \
@@ -167,11 +186,15 @@ stages:
       tar -xzf /tmp/trivy.tar.gz -C /tmp trivy
       sudo install /tmp/trivy /usr/local/bin/trivy
 
-      echo "--- full findings (informational) ---"
-      trivy fs --scanners vuln,misconfig,secret --severity LOW,MEDIUM --exit-code 0 .
+      echo "=== trivy: ALL findings, all severities (REPORT ONLY) ==="
+      trivy fs --scanners vuln,misconfig,secret \
+        --severity LOW,MEDIUM,HIGH,CRITICAL --exit-code 0 .
 
-      echo "--- blocking findings (HIGH/CRITICAL) ---"
-      trivy fs --scanners vuln,misconfig,secret --severity HIGH,CRITICAL --exit-code 1 .
+      echo "=== trivy: CRITICAL/HIGH detail (REPORT ONLY — NOT blocking) ==="
+      trivy fs --scanners vuln,misconfig,secret \
+        --severity HIGH,CRITICAL --exit-code 0 --format json .
+
+      echo "=== END OF SECURITY REPORT — this stage cannot fail the build ==="
 - id: provision
   kind: provision
   needs:
@@ -286,6 +309,11 @@ stages:
       cd infra
       IP=$(terraform output -raw public_ip)
 
+      # NOTE: the security STAGE is report-only by user direction, but these
+      # live-host posture checks still BLOCK. They assert properties of the
+      # RUNNING system rather than scanning source, and they are cheap and
+      # deterministic — there is no reason to weaken them too.
+      #
       # IMDSv2 must be enforced — an unauthenticated v1 token request must fail.
       # A 200 here means the instance metadata (and its IAM creds) is reachable
       # by any SSRF against the app.

@@ -32,9 +32,9 @@ both are success.
 ## Quality gates
 
 Every deploy runs these before any infrastructure is touched. `provision` is
-gated on both `test` and `security` passing.
+gated on `test` and `security` completing.
 
-**lint**
+**lint** — blocking
 - `puppet parser validate` — syntax
 - `puppet-lint` — style and structure
 - `puppet apply --noop` — compiles the full catalog, which is what catches
@@ -42,24 +42,45 @@ gated on both `test` and `security` passing.
   alone cannot: it parses without evaluating.
 - `shellcheck` on the installer script
 
-**test** — `rspec-puppet`, with a **90% resource-coverage floor** that fails the
-build when it drops. The suite compiles the manifest in-process and asserts on
-the resulting catalog, including regression tests for two bugs that previously
-reached production: the heredoc escape that turned nginx's `$uri` into a Puppet
-variable, and a recursive `0644` that stripped the document root's traverse bit
-and made nginx return 403 on every request.
+**test** — blocking. `rspec-puppet`, with a **90% resource-coverage floor** that
+fails the build when it drops. The suite compiles the manifest in-process and
+asserts on the resulting catalog, including regression tests for two bugs that
+previously reached production: the heredoc escape that turned nginx's `$uri`
+into a Puppet variable, and a recursive `0644` that stripped the document root's
+traverse bit and made nginx return 403 on every request. It also fails outright
+on an empty catalog — 100% coverage of zero resources passes any floor while
+asserting nothing.
 
-**security** — findings are printed in full; **HIGH and CRITICAL fail the build**,
-MEDIUM and LOW are reported for review.
+**security** — ⚠️ **REPORT-ONLY. This stage cannot fail the build.**
 - `gitleaks` — secrets across the full git history
 - `tfsec` — Terraform misconfiguration
 - `trivy` — filesystem vulnerabilities, misconfiguration and secrets
 
+> **Read this before trusting a green pipeline.**
+>
+> The security stage was made non-blocking on 2026-08-27 at the project owner's
+> explicit direction, overriding a recommendation to triage the findings
+> individually and suppress only the deliberate ones. It was **not** made
+> non-blocking because the findings were reviewed and accepted — at the time of
+> the change there were **4 unreviewed CRITICAL findings** outstanding.
+>
+> Consequently a green ✅ on this pipeline says nothing about the security of
+> this repository. No finding at any severity — including a committed
+> credential — will stop a deploy. Read the stage's log output instead.
+>
+> To restore blocking: in `.udap/pipeline.yaml`, remove the `|| true` from the
+> gitleaks invocation and change the tfsec/trivy detail passes back to
+> `tfsec infra --minimum-severity HIGH` and `trivy ... --exit-code 1`.
+
+The live-host posture checks in the **verify** stage are unaffected and still
+block: they assert IMDSv2 is not bypassable and directory listing is off on the
+running instance.
+
 Running the unit tests locally, with Puppet 8 installed:
 
 ```sh
-/opt/puppetlabs/puppet/bin/gem install --no-document rspec-puppet rspec puppetlabs_spec_helper
-/opt/puppetlabs/puppet/bin/rspec
+sudo /opt/puppetlabs/puppet/bin/gem install --no-document 'rspec-puppet:~> 5.0' rspec
+sudo /opt/puppetlabs/puppet/bin/rspec --default-path spec spec/hosts
 ```
 
 ## Security posture
@@ -74,6 +95,7 @@ Running the unit tests locally, with Puppet 8 installed:
   certificate for a bare IP address, so HTTPS requires a domain name first —
   either Let's Encrypt via certbot on the instance, or ACM behind a load
   balancer. Port 443 is already open in the security group.
+- **Scanner findings are not gated.** See the warning under Quality gates.
 
 ## Tier
 
