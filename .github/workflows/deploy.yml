@@ -17,11 +17,14 @@ jobs:
     - name: Validate Puppet manifest syntax
       run: /opt/puppetlabs/bin/puppet parser validate puppet/manifests/site.pp
     - name: Puppet style check
-      run: "# puppet-lint catches structural/style defects the parser accepts.\n#\
-        \ Ships inside the puppet-agent package's own ruby.\n/opt/puppetlabs/puppet/bin/gem\
-        \ install puppet-lint --no-document\n/opt/puppetlabs/puppet/bin/puppet-lint\
-        \ \\\n  --no-autoloader_layout-check \\\n  --no-140chars-check \\\n  --fail-on-warnings\
-        \ \\\n  puppet/manifests/site.pp\n"
+      run: "# puppet-lint catches structural/style defects the parser accepts.\n#\n\
+        # The gem MUST be installed with sudo: puppet-agent owns\n# /opt/puppetlabs/puppet/lib/ruby/gems,\
+        \ root:root, and the runner user\n# cannot write there \u2014 rubygems fails\
+        \ its pre-install check with\n# Gem::FilePermissionError. Every other privileged\
+        \ step here already\n# uses sudo; these gem installs were the inconsistency.\n\
+        sudo /opt/puppetlabs/puppet/bin/gem install puppet-lint --no-document\nsudo\
+        \ /opt/puppetlabs/puppet/bin/puppet-lint \\\n  --no-autoloader_layout-check\
+        \ \\\n  --no-140chars-check \\\n  --fail-on-warnings \\\n  puppet/manifests/site.pp\n"
     - name: Compile Puppet catalog (noop)
       run: "# `parser validate` only checks SYNTAX. It does NOT evaluate the manifest,\n\
         # so unknown variables (an unescaped nginx $uri in a heredoc) and duplicate\n\
@@ -66,20 +69,19 @@ jobs:
         \ apt-get update\nsudo apt-get install -y puppet-agent\n"
     - name: Install rspec-puppet toolchain
       run: "# Use the puppet-agent's bundled ruby so the rspec-puppet harness loads\n\
-        # the SAME puppet 8 that lint parses and the host applies.\n/opt/puppetlabs/puppet/bin/gem\
+        # the SAME puppet 8 that lint parses and the host applies.\n#\n# sudo is REQUIRED\
+        \ \u2014 /opt/puppetlabs is root-owned, and an unprivileged\n# `gem install`\
+        \ dies with Gem::FilePermissionError before installing\n# anything (same root\
+        \ cause as the lint stage's puppet-lint install).\nsudo /opt/puppetlabs/puppet/bin/gem\
         \ install --no-document \\\n  rspec-puppet rspec puppetlabs_spec_helper\n"
     - name: Run Puppet unit tests with coverage
-      run: '# rspec-puppet compiles the catalog in-process and asserts on the
-
-        # resulting resources. It fails the build below the coverage floor
-
-        # configured in spec/spec_helper.rb (90% of declared resources).
-
-        export PATH="/opt/puppetlabs/puppet/bin:/opt/puppetlabs/bin:$PATH"
-
-        /opt/puppetlabs/puppet/bin/rspec --format documentation
-
-        '
+      run: "# rspec-puppet compiles the catalog in-process and asserts on the\n# resulting\
+        \ resources. It fails the build below the coverage floor\n# configured in\
+        \ spec/spec_helper.rb (90% of declared resources).\n#\n# Run under sudo with\
+        \ the vendored ruby: the gems were installed into\n# the root-owned gem home\
+        \ above, so the same interpreter must load them.\n# -E preserves the environment;\
+        \ the binary path is absolute regardless.\nsudo -E /opt/puppetlabs/puppet/bin/ruby\
+        \ \\\n  /opt/puppetlabs/puppet/bin/rspec --format documentation\n"
     - name: Publish coverage report
       uses: actions/upload-artifact@v4
       with:

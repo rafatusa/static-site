@@ -19,9 +19,14 @@ stages:
   - name: Puppet style check
     run: |
       # puppet-lint catches structural/style defects the parser accepts.
-      # Ships inside the puppet-agent package's own ruby.
-      /opt/puppetlabs/puppet/bin/gem install puppet-lint --no-document
-      /opt/puppetlabs/puppet/bin/puppet-lint \
+      #
+      # The gem MUST be installed with sudo: puppet-agent owns
+      # /opt/puppetlabs/puppet/lib/ruby/gems, root:root, and the runner user
+      # cannot write there — rubygems fails its pre-install check with
+      # Gem::FilePermissionError. Every other privileged step here already
+      # uses sudo; these gem installs were the inconsistency.
+      sudo /opt/puppetlabs/puppet/bin/gem install puppet-lint --no-document
+      sudo /opt/puppetlabs/puppet/bin/puppet-lint \
         --no-autoloader_layout-check \
         --no-140chars-check \
         --fail-on-warnings \
@@ -76,15 +81,23 @@ stages:
     run: |
       # Use the puppet-agent's bundled ruby so the rspec-puppet harness loads
       # the SAME puppet 8 that lint parses and the host applies.
-      /opt/puppetlabs/puppet/bin/gem install --no-document \
+      #
+      # sudo is REQUIRED — /opt/puppetlabs is root-owned, and an unprivileged
+      # `gem install` dies with Gem::FilePermissionError before installing
+      # anything (same root cause as the lint stage's puppet-lint install).
+      sudo /opt/puppetlabs/puppet/bin/gem install --no-document \
         rspec-puppet rspec puppetlabs_spec_helper
   - name: Run Puppet unit tests with coverage
     run: |
       # rspec-puppet compiles the catalog in-process and asserts on the
       # resulting resources. It fails the build below the coverage floor
       # configured in spec/spec_helper.rb (90% of declared resources).
-      export PATH="/opt/puppetlabs/puppet/bin:/opt/puppetlabs/bin:$PATH"
-      /opt/puppetlabs/puppet/bin/rspec --format documentation
+      #
+      # Run under sudo with the vendored ruby: the gems were installed into
+      # the root-owned gem home above, so the same interpreter must load them.
+      # -E preserves the environment; the binary path is absolute regardless.
+      sudo -E /opt/puppetlabs/puppet/bin/ruby \
+        /opt/puppetlabs/puppet/bin/rspec --format documentation
   - name: Publish coverage report
     uses: actions/upload-artifact@v4
     with:
