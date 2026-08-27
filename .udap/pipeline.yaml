@@ -144,8 +144,13 @@ stages:
       # │ CONSEQUENCE: no security finding of ANY severity — including a   │
       # │ committed credential or a new CRITICAL introduced later — will   │
       # │ block a deploy. The scanners are an audit log, not a gate.       │
-      # │ Restore blocking by removing the `|| true` from each scanner and │
-      # │ re-adding the --exit-code 1 / --minimum-severity HIGH pass.      │
+      # │ Restore blocking by removing the `--exit-code 0` / `--soft-fail` │
+      # │ / trailing `exit 0` from each scanner step below.                │
+      # │                                                                  │
+      # │ Findings outstanding and ACCEPTED-BY-INACTION as of this rev:    │
+      # │   AWS-0104 CRITICAL  unrestricted egress 0.0.0.0/0  ec2.tf:63    │
+      # │   AWS-0107 HIGH      unrestricted ingress           ec2.tf:39    │
+      # │ Both are deliberate Tier-1 design choices, NOT reviewed defects. │
       # └──────────────────────────────────────────────────────────────────┘
       #
       # The tool INSTALL is also non-fatal, but it is LOUD when it fails.
@@ -319,6 +324,38 @@ stages:
     run: |
       HOST="$SSH_USER@${{ steps.infra.outputs.ip }}"
       ssh -i ~/.ssh/deploy_key "$HOST" 'sudo /opt/puppetlabs/bin/puppet apply --detailed-exitcodes /tmp/udap-deploy/puppet/manifests/site.pp; rc=$?; test $rc -eq 0 -o $rc -eq 2'
+  - name: Assert IMDSv2 is enforced on the instance
+    run: |
+      # IMDS lives at the LINK-LOCAL address 169.254.169.254, which is
+      # reachable ONLY FROM INSIDE the instance. This check therefore belongs
+      # here, in the stage that has SSH, and NOT in verify.
+      #
+      # A previous rev asserted this from the runner against the instance's
+      # PUBLIC ip (http://<public-ip>/latest/meta-data/). That request never
+      # reached IMDS at all — it hit nginx, whose `try_files ... /index.html`
+      # fallback served the landing page with 200, and the assertion failed.
+      # Worse, had it returned non-200 it would have PASSED while testing
+      # nothing: no external request can observe IMDS configuration.
+      #
+      # Two assertions, because either alone is vacuous:
+      #   1. no token  -> 401  (v1 is refused: http_tokens = "required")
+      #   2. token PUT -> 200  (IMDS is actually reachable, so the 401 above
+      #                         means enforcement and not a broken/absent IMDS)
+      HOST="$SSH_USER@${{ steps.infra.outputs.ip }}"
+
+      echo "IMDSv1 (no token) must be refused with 401"
+      code=$(ssh -i ~/.ssh/deploy_key "$HOST" \
+        "curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://169.254.169.254/latest/meta-data/")
+      echo "  got: $code"
+      test "$code" = "401"
+
+      echo "IMDSv2 token endpoint must succeed with 200"
+      token_code=$(ssh -i ~/.ssh/deploy_key "$HOST" \
+        "curl -s -X PUT -o /dev/null -w '%{http_code}' --max-time 5 -H 'X-aws-ec2-metadata-token-ttl-seconds: 60' http://169.254.169.254/latest/api/token")
+      echo "  got: $token_code"
+      test "$token_code" = "200"
+
+      echo "IMDSv2 enforcement confirmed"
 - id: verify
   kind: verify
   needs:
@@ -343,30 +380,38 @@ stages:
       IP=$(terraform output -raw public_ip)
       curl --fail --retry 12 --retry-delay 15 --retry-all-errors "http://$IP/health"
       curl --fail --silent --output /dev/null --retry 6 --retry-delay 10 --retry-all-errors "http://$IP/"
-  - name: Verify security posture on the live host
+  - name: Verify externally observable posture
     run: |
       cd infra
       IP=$(terraform output -raw public_ip)
 
       # NOTE: the security STAGE is report-only by user direction, but these
-      # live-host posture checks still BLOCK. They assert properties of the
-      # RUNNING system rather than scanning source, and they are cheap and
-      # deterministic — there is no reason to weaken them too.
+      # checks still BLOCK. They assert properties of the RUNNING system and
+      # are cheap and deterministic — the instruction concerned the scanners.
       #
-      # IMDSv2 must be enforced — an unauthenticated v1 token request must fail.
-      # A 200 here means the instance metadata (and its IAM creds) is reachable
-      # by any SSRF against the app.
-      echo "checking IMDSv2 enforcement is not bypassable from outside"
-      code=$(curl --silent --output /dev/null --write-out '%{http_code}' \
-        --max-time 5 "http://$IP/latest/meta-data/" || true)
-      test "$code" != "200"
+      # Only assert what an EXTERNAL client can actually observe. IMDSv2 is
+      # NOT in that set (link-local, instance-only) and is asserted over SSH in
+      # the configure stage instead.
 
-      # Directory listing must be off (nginx default, but assert it).
+      # The document root must not be browsable. This ALSO guards the recursive
+      # -mode bug that once made nginx 403 everything: a 200 with real content
+      # and no listing is the property we want.
       echo "checking directory listing is disabled"
       body=$(curl --silent --max-time 10 "http://$IP/" || true)
       case "$body" in
         *"Index of /"*) echo "directory listing is ENABLED"; exit 1 ;;
       esac
-      echo "security posture checks passed"
+
+      # The landing page must be real HTML, not an error body served with 200.
+      echo "checking / serves HTML content"
+      ctype=$(curl --silent --output /dev/null --write-out '%{content_type}' \
+        --max-time 10 "http://$IP/")
+      echo "  content-type: $ctype"
+      case "$ctype" in
+        text/html*) ;;
+        *) echo "unexpected content-type for /"; exit 1 ;;
+      esac
+
+      echo "external posture checks passed"
 rollback:
   strategy: rerun

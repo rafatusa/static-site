@@ -31,9 +31,6 @@ both are success.
 
 ## Quality gates
 
-Every deploy runs these before any infrastructure is touched. `provision` is
-gated on `test` and `security` completing.
-
 **lint** — blocking
 - `puppet parser validate` — syntax
 - `puppet-lint` — style and structure
@@ -56,25 +53,40 @@ asserting nothing.
 - `tfsec` — Terraform misconfiguration
 - `trivy` — filesystem vulnerabilities, misconfiguration and secrets
 
+**configure** — blocking. After Puppet applies, asserts over SSH that **IMDSv2
+is enforced**: an unauthenticated metadata request returns `401`, and the token
+endpoint returns `200`. Both assertions are needed — the `401` alone would also
+be produced by an unreachable IMDS, which would prove nothing.
+
+**verify** — blocking. `/health` and `/` return 200, the document root is not
+browsable, and `/` serves `text/html` rather than an error body with a 200 code.
+
 > **Read this before trusting a green pipeline.**
 >
 > The security stage was made non-blocking on 2026-08-27 at the project owner's
 > explicit direction, overriding a recommendation to triage the findings
 > individually and suppress only the deliberate ones. It was **not** made
-> non-blocking because the findings were reviewed and accepted — at the time of
-> the change there were **4 unreviewed CRITICAL findings** outstanding.
+> non-blocking because the findings were reviewed and accepted.
 >
 > Consequently a green ✅ on this pipeline says nothing about the security of
 > this repository. No finding at any severity — including a committed
 > credential — will stop a deploy. Read the stage's log output instead.
 >
-> To restore blocking: in `.udap/pipeline.yaml`, remove the `|| true` from the
-> gitleaks invocation and change the tfsec/trivy detail passes back to
-> `tfsec infra --minimum-severity HIGH` and `trivy ... --exit-code 1`.
-
-The live-host posture checks in the **verify** stage are unaffected and still
-block: they assert IMDSv2 is not bypassable and directory listing is off on the
-running instance.
+> **Currently outstanding, un-suppressed and un-gated:**
+>
+> | ID | Severity | Location | Finding |
+> |---|---|---|---|
+> | `AWS-0104` | CRITICAL | `infra/ec2.tf:63` | Unrestricted egress to `0.0.0.0/0` |
+> | `AWS-0107` | HIGH | `infra/ec2.tf:39` | Unrestricted ingress (`var.ssh_allowed_cidr`) |
+>
+> Both correspond to deliberate Tier-1 choices documented under Security
+> posture below — egress is required for apt/Puppet/GitHub, and the SSH CIDR is
+> open because GitHub-hosted runners rotate IP addresses. They are accepted by
+> inaction rather than by review.
+>
+> To restore blocking: in `.udap/pipeline.yaml`, drop the `--exit-code 0` /
+> `--soft-fail` / trailing `exit 0` from each scanner step. The two findings
+> above are then what must be fixed or narrowly suppressed.
 
 Running the unit tests locally, with Puppet 8 installed:
 
@@ -86,11 +98,14 @@ sudo /opt/puppetlabs/puppet/bin/rspec --default-path spec spec/hosts
 ## Security posture
 
 - IMDSv2 is **required** — instance metadata is unreachable without a session
-  token, so an SSRF cannot read instance credentials.
+  token, so an SSRF cannot read instance credentials. Asserted on the host by
+  the configure stage.
 - The root EBS volume is **encrypted** at rest.
 - SSH exposure is the `ssh_allowed_cidr` variable. It defaults to `0.0.0.0/0`
   because GitHub-hosted runners connect from a large rotating IP range; narrow
   it if you move to self-hosted runners or a bastion.
+- Egress is unrestricted, which the instance needs for apt, the Puppet APT repo
+  and GitHub.
 - **No TLS.** The site is HTTP-only on port 80. A public CA will not issue a
   certificate for a bare IP address, so HTTPS requires a domain name first —
   either Let's Encrypt via certbot on the instance, or ACM behind a load
