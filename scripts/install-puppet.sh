@@ -17,7 +17,9 @@ if [ -x "$PUPPET_BIN" ]; then
   exit 0
 fi
 
-CODENAME="$(awk -F= '$1=="VERSION_CODENAME"{print $2}' /etc/os-release)"
+# shellcheck disable=SC1091
+. /etc/os-release
+CODENAME="$VERSION_CODENAME"
 RELEASE_DEB="puppet8-release-${CODENAME}.deb"
 
 echo "Installing Puppet 8 for ${CODENAME}..."
