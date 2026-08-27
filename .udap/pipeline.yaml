@@ -135,7 +135,7 @@ stages:
       # │ REPORT-ONLY BY EXPLICIT USER DIRECTION (2026-08-27).             │
       # │                                                                  │
       # │ The user asked for the security stage to be kept but to stop     │
-      # │ failing the pipeline, INCLUDING on CRITICAL findings. The agent   │
+      # │ failing the pipeline, INCLUDING on CRITICAL findings. The agent  │
       # │ advised against this and proposed per-finding triage with        │
       # │ targeted, commented suppressions instead; the user chose         │
       # │ report-only anyway. Recorded as a deliberate exception, not as   │
@@ -148,53 +148,92 @@ stages:
       # │ re-adding the --exit-code 1 / --minimum-severity HIGH pass.      │
       # └──────────────────────────────────────────────────────────────────┘
       #
-      # Full history, not just the working tree — a credential removed in a
-      # later commit is still published in the pack.
+      # The tool INSTALL is also non-fatal, but it is LOUD when it fails.
+      # A previous run died here on a 404 from a hardcoded release asset URL
+      # (trivy) — under `bash -e`, `curl -f` exit 22 killed the step before the
+      # scanner ran, so the stage reported a failure that had nothing to do
+      # with security. Since nothing blocks now, an install failure must not
+      # abort the job; but it MUST be visible, or a green stage with no scanner
+      # output silently reads as "no findings".
+      set +e
       VERSION=8.21.2
-      curl -fsSL --retry 3 \
+      curl -fsSL --retry 3 --retry-delay 5 \
         "https://github.com/gitleaks/gitleaks/releases/download/v${VERSION}/gitleaks_${VERSION}_linux_x64.tar.gz" \
-        -o /tmp/gitleaks.tar.gz
-      tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
-      sudo install /tmp/gitleaks /usr/local/bin/gitleaks
+        -o /tmp/gitleaks.tar.gz \
+        && tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks \
+        && sudo install /tmp/gitleaks /usr/local/bin/gitleaks
 
-      echo "=== gitleaks: secret scan (REPORT ONLY — does not fail the build) ==="
-      gitleaks detect --source . --redact --verbose --exit-code 0 || true
+      if ! command -v gitleaks >/dev/null 2>&1; then
+        echo "!!! SCANNER UNAVAILABLE: gitleaks ${VERSION} could not be installed."
+        echo "!!! NO SECRET SCAN RAN. This is a gap in the report, not a clean result."
+        exit 0
+      fi
+
+      echo "=== gitleaks: secret scan across full history (REPORT ONLY) ==="
+      gitleaks detect --source . --redact --verbose --exit-code 0
+      echo "=== gitleaks: complete ==="
+      exit 0
   - name: IaC security scan (tfsec)
     run: |
       # REPORT ONLY by user direction — see the banner in the gitleaks step.
       # Since nothing blocks, the OUTPUT is the entire value of this step, so
-      # every finding is printed in full at every severity. A stage that reports
-      # a count instead of a cause is worthless to whoever reads it later.
+      # every finding is printed at every severity. A stage that reports a count
+      # instead of a cause is worthless to whoever reads it later.
+      set +e
       VERSION=1.28.13
-      curl -fsSL --retry 3 \
+      curl -fsSL --retry 3 --retry-delay 5 \
         "https://github.com/aquasecurity/tfsec/releases/download/v${VERSION}/tfsec-linux-amd64" \
-        -o /tmp/tfsec
-      sudo install /tmp/tfsec /usr/local/bin/tfsec
+        -o /tmp/tfsec \
+        && sudo install /tmp/tfsec /usr/local/bin/tfsec
+
+      if ! command -v tfsec >/dev/null 2>&1; then
+        echo "!!! SCANNER UNAVAILABLE: tfsec ${VERSION} could not be installed."
+        echo "!!! NO IaC SCAN RAN. This is a gap in the report, not a clean result."
+        exit 0
+      fi
 
       echo "=== tfsec: ALL findings, all severities (REPORT ONLY) ==="
-      tfsec infra --soft-fail --include-passed=false
+      tfsec infra --soft-fail
 
-      echo "=== tfsec: CRITICAL/HIGH detail (REPORT ONLY — NOT blocking) ==="
-      tfsec infra --soft-fail --minimum-severity HIGH --format json
+      echo "=== tfsec: HIGH/CRITICAL detail (REPORT ONLY — NOT blocking) ==="
+      tfsec infra --soft-fail --minimum-severity HIGH
+      echo "=== tfsec: complete ==="
+      exit 0
   - name: Filesystem and IaC scan (trivy)
     run: |
       # REPORT ONLY by user direction — see the banner in the gitleaks step.
-      VERSION=0.58.1
-      curl -fsSL --retry 3 \
-        "https://github.com/aquasecurity/trivy/releases/download/v${VERSION}/trivy_${VERSION}_Linux-64bit.tar.gz" \
-        -o /tmp/trivy.tar.gz
-      tar -xzf /tmp/trivy.tar.gz -C /tmp trivy
-      sudo install /tmp/trivy /usr/local/bin/trivy
+      #
+      # Install via the OFFICIAL INSTALLER, not a hand-written release-asset
+      # URL. The previous pinned URL
+      #   .../v0.58.1/trivy_0.58.1_Linux-64bit.tar.gz
+      # returned 404 and killed this step under `bash -e` before trivy ran.
+      # The installer resolves the correct asset name for the platform itself,
+      # so an upstream change to the asset naming cannot break this again.
+      set +e
+      curl -fsSL --retry 3 --retry-delay 5 \
+        https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
+        -o /tmp/install-trivy.sh \
+        && sudo sh /tmp/install-trivy.sh -b /usr/local/bin
+
+      if ! command -v trivy >/dev/null 2>&1; then
+        echo "!!! SCANNER UNAVAILABLE: trivy could not be installed."
+        echo "!!! NO VULN/MISCONFIG/SECRET SCAN RAN. This is a gap in the report,"
+        echo "!!! not a clean result."
+        exit 0
+      fi
+
+      trivy --version
 
       echo "=== trivy: ALL findings, all severities (REPORT ONLY) ==="
       trivy fs --scanners vuln,misconfig,secret \
         --severity LOW,MEDIUM,HIGH,CRITICAL --exit-code 0 .
 
-      echo "=== trivy: CRITICAL/HIGH detail (REPORT ONLY — NOT blocking) ==="
+      echo "=== trivy: HIGH/CRITICAL detail (REPORT ONLY — NOT blocking) ==="
       trivy fs --scanners vuln,misconfig,secret \
-        --severity HIGH,CRITICAL --exit-code 0 --format json .
+        --severity HIGH,CRITICAL --exit-code 0 .
 
       echo "=== END OF SECURITY REPORT — this stage cannot fail the build ==="
+      exit 0
 - id: provision
   kind: provision
   needs:
