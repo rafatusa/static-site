@@ -9,7 +9,7 @@ require 'spec_helper'
 #
 # `environment` is declared here as a `let`, NOT in RSpec.configure — it is a
 # per-example setting in rspec-puppet 5 and setting it globally raises
-# NoMethodError. See the API notes in spec/spec_helper.rb.
+# NoMethodError. See the fixture notes in spec/spec_helper.rb.
 #
 # Every example asserts on a resource the manifest actually declares. If a
 # resource is renamed or removed these fail — which is the point.
@@ -27,24 +27,30 @@ describe 'static-site node', type: :host do
 
   # VACUOUS-PASS GUARD. Read this before touching the fixture layout.
   #
-  # A catalog that loaded NO manifest still compiles successfully — it is simply
-  # empty. Every other example then fails with "expected that the catalogue
-  # would contain ...", and the coverage report prints "Total resources: 0,
-  # Resource coverage: 100.00%", which SATISFIES the 90% floor. That exact
-  # combination has already occurred on this project: a coverage gate that can
-  # pass while asserting nothing is worse than no gate, because it is trusted.
+  # A catalog that loaded NO manifest still compiles successfully — it just
+  # holds Puppet's own boilerplate (Stage[main], Class[Settings], Class[main]).
+  # Every other example then fails with "expected that the catalogue would
+  # contain ...", and the coverage report prints "Total resources: 0, Resource
+  # coverage: 100.00%", which SATISFIES the 90% floor. That exact combination
+  # has already occurred on this project: a coverage gate that can pass while
+  # asserting nothing is worse than no gate, because it is trusted.
   #
-  # This asserts the environment actually loaded site.pp, and names the fixture
-  # layout as the cause when it fails, so the diagnosis does not cost a CI round.
+  # On failure this dumps the catalog's actual contents, so a fixture-layout
+  # regression is diagnosed from one log rather than one CI round per guess.
   it 'loads the real manifest (catalog is not empty)' do
-    count = catalogue.resources.reject { |r| r.type == 'Class' && r.title == 'main' }.size
+    boilerplate = ->(r) { r.type == 'Stage' || (r.type == 'Class' && %w[main Settings].include?(r.title)) }
+    declared    = catalogue.resources.reject(&boilerplate)
+    listing     = declared.map { |r| "#{r.type}[#{r.title}]" }.sort.join(', ')
 
-    expect(count).to be >= MINIMUM_EXPECTED_RESOURCES,
-                     "catalog has #{count} resources (expected >= " \
-                     "#{MINIMUM_EXPECTED_RESOURCES}). The fixture environment did " \
-                     'not load puppet/manifests/site.pp — check ' \
-                     'spec/fixtures/production/environment.conf and the site.pp link. ' \
-                     'The manifest did not shrink; the environment is empty.'
+    expect(declared.size).to be >= MINIMUM_EXPECTED_RESOURCES,
+                             "catalog holds #{declared.size} declared resources " \
+                             "(expected >= #{MINIMUM_EXPECTED_RESOURCES}).\n" \
+                             "Actually present: #{listing.empty? ? '(nothing)' : listing}\n" \
+                             "The manifest did not shrink — the fixture environment did not " \
+                             "load puppet/manifests/site.pp.\n" \
+                             "Check spec/fixtures/production/environment.conf (the `manifest` " \
+                             "setting must name the copied site.pp) and confirm the manifest was " \
+                             "COPIED, not symlinked: Puppet skips symlinks when loading manifests."
   end
 
   describe 'nginx package' do
