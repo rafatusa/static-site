@@ -24,6 +24,26 @@ resource "aws_key_pair" "app" {
   }
 }
 
+# ── ACCEPTED SECURITY FINDINGS (reviewed 2026-08-27) ──────────────────────────
+# The security stage BLOCKS on HIGH/CRITICAL. These two suppressions are the
+# only exceptions, each scoped to ONE rule id, with the reason stated. Any other
+# finding — a new open port, an unencrypted volume, a committed secret — fails
+# the build. Do not broaden these to a blanket ignore.
+#
+# AWS-0107 (HIGH, ingress 0.0.0.0/0 on port 22)
+#   SSH must be reachable from GitHub-hosted runners, which draw from a large
+#   published range that Microsoft rotates continuously. Pinning a CIDR breaks
+#   the configure stage the next time the range changes. The exposure is
+#   mitigated by key-only auth (no password auth, no root login) and the fact
+#   that the host serves only static files. Sourced from var.ssh_allowed_cidr
+#   so tightening it is a one-value change when a fixed egress IP exists.
+#
+# AWS-0104 (CRITICAL, unrestricted egress)
+#   The host must reach apt archives, apt.puppet.com and github.com to be
+#   configured at all. Those are CDN-backed with no stable address set, so an
+#   egress allowlist would fail unpredictably on upstream IP changes. Outbound
+#   from a static-file host carries no data-exfiltration surface of its own.
+# ─────────────────────────────────────────────────────────────────────────────
 resource "aws_security_group" "app" {
   name        = "${var.project_name}-sg"
   description = "SSH + public web for ${var.project_name}"
@@ -31,6 +51,7 @@ resource "aws_security_group" "app" {
   # Sourced from a variable so the exposure is explicit and reviewable rather
   # than a hardcoded default. See the variable's documentation for why the
   # default is open (GitHub-hosted runners use a rotating IP range).
+  # tfsec:ignore:aws-ec2-no-public-ingress-sgr
   ingress {
     description = "SSH from the CI runner"
     from_port   = 22
@@ -55,6 +76,7 @@ resource "aws_security_group" "app" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
+  # tfsec:ignore:aws-ec2-no-public-egress-sgr
   egress {
     description = "Package and Puppet repository access"
     from_port   = 0
