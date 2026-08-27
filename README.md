@@ -71,21 +71,30 @@ and `/` serves `text/html` rather than an error body with a 200 code.
 
 ### Accepted security findings
 
-Two `tfsec` rules are suppressed, each by a single-rule `tfsec:ignore` comment
-on the exact block in `infra/ec2.tf`, with its justification written alongside:
+Four `tfsec` findings are suppressed, each by a single-rule `tfsec:ignore`
+comment on the exact rule block in `infra/ec2.tf`, with its justification
+written alongside:
 
-| Rule | Location | Why it is accepted |
+| Rule | Block | Why it is accepted |
 |---|---|---|
-| `aws-ec2-no-public-ingress-sgr` | SSH ingress | GitHub-hosted runners connect from a large range Microsoft rotates continuously; a pinned CIDR breaks the configure stage on the next change. Mitigated by key-only auth on a host serving only static files. |
+| `aws-ec2-no-public-ingress-sgr` | SSH (22) | GitHub-hosted runners connect from a large range Microsoft rotates continuously; a pinned CIDR breaks the configure stage on the next change. Mitigated by key-only auth on a host serving only static files. |
+| `aws-ec2-no-public-ingress-sgr` | HTTP (80) | This is a public website. Serving HTTP to the internet is the host's purpose — a restrictive CIDR would mean nobody can reach the site. |
+| `aws-ec2-no-public-ingress-sgr` | HTTPS (443) | Same as port 80; open ahead of TLS being configured. |
 | `aws-ec2-no-public-egress-sgr` | egress | The host must reach apt archives, `apt.puppet.com` and `github.com` to be configured at all. These are CDN-backed with no stable address set. |
 
-These are the *only* exemptions. Verified against `tfsec` v1.28.13: with the
-ignores in place the scan reports `critical 0` and exits 0, while an unrelated
-new HIGH finding still exits 1. A new open port, an unencrypted volume or a
-committed secret will fail the build.
+These are the *only* exemptions. Verified against `tfsec` v1.28.13 on this
+directory: with the ignores the scan reports `ignored 9, critical 0` and exits
+0, while an unrelated unencrypted EBS volume still exits 1. A new open port, an
+unencrypted volume or a committed secret will fail the build.
 
-Do not broaden these to a resource- or file-level ignore. Fix new findings, or
-add a new single-rule ignore with its own written justification.
+> **Placement matters.** `tfsec:ignore` applies to the block it *immediately
+> precedes* and does **not** cascade from the enclosing `resource` block down to
+> nested `ingress`/`egress` rules. A single ignore on the resource was measured
+> and left both public-web rules unsuppressed. Give each rule block its own.
+
+Do not broaden these to a file-level ignore, and do not add `--soft-fail` to the
+pipeline. Fix new findings, or add a new single-rule ignore with its own written
+justification.
 
 Running the unit tests locally, with Puppet 8 installed:
 
@@ -109,7 +118,7 @@ sudo /opt/puppetlabs/puppet/bin/rspec --default-path spec spec/hosts
   certificate for a bare IP address, so HTTPS requires a domain name first —
   either Let's Encrypt via certbot on the instance, or ACM behind a load
   balancer. Port 443 is already open in the security group.
-- Scanner findings are gated at HIGH, with the two exemptions listed above.
+- Scanner findings are gated at HIGH, with the four exemptions listed above.
 
 ## Tier
 

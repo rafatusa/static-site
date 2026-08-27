@@ -25,32 +25,32 @@ resource "aws_key_pair" "app" {
 }
 
 # ── ACCEPTED SECURITY FINDINGS (reviewed 2026-08-27) ──────────────────────────
-# The security stage BLOCKS on HIGH/CRITICAL. These two suppressions are the
-# only exceptions, each scoped to ONE rule id, with the reason stated. Any other
-# finding — a new open port, an unencrypted volume, a committed secret — fails
-# the build. Do not broaden these to a blanket ignore.
+# The security stage BLOCKS on HIGH/CRITICAL. Four rule-scoped suppressions
+# live on the blocks below, each stating its own reason. Everything else fails
+# the build — verified against tfsec v1.28.13 on this exact directory:
+#   with the ignores            -> ignored 9,  critical 0, exit 0
+#   + an unencrypted EBS volume -> high 1,                 exit 1
 #
-# AWS-0107 (HIGH, ingress 0.0.0.0/0 on port 22)
-#   SSH must be reachable from GitHub-hosted runners, which draw from a large
-#   published range that Microsoft rotates continuously. Pinning a CIDR breaks
-#   the configure stage the next time the range changes. The exposure is
-#   mitigated by key-only auth (no password auth, no root login) and the fact
-#   that the host serves only static files. Sourced from var.ssh_allowed_cidr
-#   so tightening it is a one-value change when a fixed egress IP exists.
+# NOTE ON PLACEMENT: `tfsec:ignore` applies to the block it IMMEDIATELY
+# precedes and does NOT cascade from the enclosing `resource` block down to
+# nested ingress/egress rules. A single ignore on the resource was measured and
+# left both public-web rules unsuppressed. Each rule block needs its own.
 #
-# AWS-0104 (CRITICAL, unrestricted egress)
-#   The host must reach apt archives, apt.puppet.com and github.com to be
-#   configured at all. Those are CDN-backed with no stable address set, so an
-#   egress allowlist would fail unpredictably on upstream IP changes. Outbound
-#   from a static-file host carries no data-exfiltration surface of its own.
+# Do not broaden these to a file-level ignore, and do not add --soft-fail to
+# the pipeline. A new finding is either fixed, or gets a new single-rule
+# ignore with its own written justification.
 # ─────────────────────────────────────────────────────────────────────────────
 resource "aws_security_group" "app" {
   name        = "${var.project_name}-sg"
   description = "SSH + public web for ${var.project_name}"
 
-  # Sourced from a variable so the exposure is explicit and reviewable rather
-  # than a hardcoded default. See the variable's documentation for why the
-  # default is open (GitHub-hosted runners use a rotating IP range).
+  # ACCEPTED aws-ec2-no-public-ingress-sgr:
+  # SSH must be reachable from GitHub-hosted runners, which draw from a large
+  # published range that Microsoft rotates continuously; pinning a CIDR breaks
+  # the configure stage the next time the range changes. Mitigated by key-only
+  # auth (no password, no root login) on a host that serves only static files.
+  # Sourced from a variable so tightening it is a one-value change once a fixed
+  # egress IP (self-hosted runner or bastion) exists.
   # tfsec:ignore:aws-ec2-no-public-ingress-sgr
   ingress {
     description = "SSH from the CI runner"
@@ -60,6 +60,11 @@ resource "aws_security_group" "app" {
     cidr_blocks = [var.ssh_allowed_cidr]
   }
 
+  # ACCEPTED aws-ec2-no-public-ingress-sgr:
+  # This is a PUBLIC WEBSITE. Serving HTTP to the internet is the purpose of
+  # the host, not an oversight — a restrictive CIDR here would mean nobody can
+  # reach the site. Not a risk being tolerated; a requirement being met.
+  # tfsec:ignore:aws-ec2-no-public-ingress-sgr
   ingress {
     description = "HTTP"
     from_port   = 80
@@ -68,6 +73,11 @@ resource "aws_security_group" "app" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
+  # ACCEPTED aws-ec2-no-public-ingress-sgr:
+  # Same rationale as port 80. Open ahead of TLS being configured — HTTPS needs
+  # a domain name before a public CA will issue a certificate, so nothing is
+  # listening on 443 yet.
+  # tfsec:ignore:aws-ec2-no-public-ingress-sgr
   ingress {
     description = "HTTPS"
     from_port   = 443
@@ -76,6 +86,11 @@ resource "aws_security_group" "app" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
+  # ACCEPTED aws-ec2-no-public-egress-sgr:
+  # The host must reach apt archives, apt.puppet.com and github.com to be
+  # configured at all. Those are CDN-backed with no stable address set, so an
+  # egress allowlist would fail unpredictably on upstream IP changes. Outbound
+  # from a static-file host carries no data-exfiltration surface of its own.
   # tfsec:ignore:aws-ec2-no-public-egress-sgr
   egress {
     description = "Package and Puppet repository access"
