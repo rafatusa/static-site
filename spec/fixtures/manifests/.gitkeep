@@ -1,0 +1,3 @@
+# rspec-puppet requires manifest_dir and module_path to exist even when the
+# project uses no external modules. Git cannot track an empty directory, so
+# this placeholder keeps the fixture tree present in the repository.

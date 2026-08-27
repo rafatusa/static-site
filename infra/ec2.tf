@@ -28,12 +28,15 @@ resource "aws_security_group" "app" {
   name        = "${var.project_name}-sg"
   description = "SSH + public web for ${var.project_name}"
 
+  # Sourced from a variable so the exposure is explicit and reviewable rather
+  # than a hardcoded default. See the variable's documentation for why the
+  # default is open (GitHub-hosted runners use a rotating IP range).
   ingress {
-    description = "SSH"
+    description = "SSH from the CI runner"
     from_port   = 22
     to_port     = 22
     protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+    cidr_blocks = [var.ssh_allowed_cidr]
   }
 
   ingress {
@@ -53,6 +56,7 @@ resource "aws_security_group" "app" {
   }
 
   egress {
+    description = "Package and Puppet repository access"
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
@@ -69,6 +73,29 @@ resource "aws_instance" "app" {
   instance_type          = var.instance_type
   key_name               = aws_key_pair.app.key_name
   vpc_security_group_ids = [aws_security_group.app.id]
+
+  # IMDSv2 REQUIRED. With the default (optional) an unauthenticated GET to
+  # 169.254.169.254 returns instance metadata, so any SSRF in a served page —
+  # or any process on the box — can read the instance role's credentials.
+  # Requiring a session token closes that off. Nothing here reads metadata,
+  # so this breaks nothing.
+  metadata_options {
+    http_endpoint               = "enabled"
+    http_tokens                 = "required"
+    http_put_response_hop_limit = 1
+  }
+
+  # Encrypt data at rest with the AWS-managed EBS key. Free, and the only
+  # moment it can be set is at creation.
+  root_block_device {
+    encrypted   = true
+    volume_type = "gp3"
+    volume_size = 8
+
+    tags = {
+      Project = var.project_name
+    }
+  }
 
   tags = {
     Name    = var.project_name

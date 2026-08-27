@@ -1,0 +1,2 @@
+# See spec/fixtures/manifests/.gitkeep — placeholder so the module path exists.
+# This manifest declares resources directly and depends on no external modules.
