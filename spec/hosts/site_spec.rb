@@ -7,11 +7,16 @@ require 'spec_helper'
 # manifests for a node and exposes the resulting catalog. `:type => :class`
 # would not apply: there is no class to instantiate.
 #
+# `environment` is declared here as a `let`, NOT in RSpec.configure — it is a
+# per-example setting in rspec-puppet 5 and setting it globally raises
+# NoMethodError. See the API notes in spec/spec_helper.rb.
+#
 # Every example asserts on a resource the manifest actually declares. If a
 # resource is renamed or removed these fail — which is the point.
 
 describe 'static-site node', type: :host do
-  let(:node) { 'static-site.example.com' }
+  let(:node)        { 'static-site.example.com' }
+  let(:environment) { 'production' }
 
   # Compiling the manifest is itself the first assertion. An unknown variable
   # (the `$uri` heredoc bug) or a duplicate declaration ('/var/www/site' vs

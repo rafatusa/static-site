@@ -102,6 +102,26 @@ stages:
       # and break the harness again on a future run.
       sudo /opt/puppetlabs/puppet/bin/gem install --no-document \
         'rspec-puppet:~> 5.0' rspec
+  - name: Report the rspec-puppet configuration API
+    run: |
+      # DIAGNOSTIC, not a gate — always exits 0.
+      #
+      # This harness has now broken twice on removed RSpec.configure attributes
+      # (manifest_dir=, then environment=), each discovered one CI round at a
+      # time. Printing the gem's ACTUAL settable configuration surface means a
+      # third mismatch is diagnosed from one log instead of another round trip.
+      sudo -E /opt/puppetlabs/puppet/bin/ruby -e '
+        require "rspec-puppet"
+        api = RSpec::Puppet::Setup rescue nil
+        settable = RSpec::Core::Configuration.instance_methods.grep(/=$/).sort
+        puppet_settable = settable.select { |m|
+          m.to_s =~ /manifest|environment|module|fact|hiera|strict|trusted|adapter/
+        }
+        puts "rspec-puppet version: #{Gem.loaded_specs["rspec-puppet"]&.version}"
+        puts "puppet version:       #{Gem.loaded_specs["puppet"]&.version}"
+        puts "--- puppet-related RSpec.configure setters available ---"
+        puppet_settable.each { |m| puts "  #{m}" }
+      ' || true
   - name: Run Puppet unit tests with coverage
     run: |
       # rspec-puppet compiles the catalog in-process and asserts on the
