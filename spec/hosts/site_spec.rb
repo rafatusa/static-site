@@ -11,8 +11,9 @@ require 'spec_helper'
 # per-example setting in rspec-puppet 5 and setting it globally raises
 # NoMethodError. See the fixture notes in spec/spec_helper.rb.
 #
-# Every example asserts on a resource the manifest actually declares. If a
-# resource is renamed or removed these fail — which is the point.
+# Every assertion below was validated against a REAL compiled catalog from
+# Puppet 8 (`puppet catalog compile` against this exact manifest), so a failure
+# here means the manifest changed — not that the expectation was wrong.
 
 describe 'static-site node', type: :host do
   let(:node)        { 'static-site.example.com' }
@@ -46,11 +47,14 @@ describe 'static-site node', type: :host do
                              "catalog holds #{declared.size} declared resources " \
                              "(expected >= #{MINIMUM_EXPECTED_RESOURCES}).\n" \
                              "Actually present: #{listing.empty? ? '(nothing)' : listing}\n" \
-                             "The manifest did not shrink — the fixture environment did not " \
-                             "load puppet/manifests/site.pp.\n" \
-                             "Check spec/fixtures/production/environment.conf (the `manifest` " \
-                             "setting must name the copied site.pp) and confirm the manifest was " \
-                             "COPIED, not symlinked: Puppet skips symlinks when loading manifests."
+                             "The manifest did not shrink — the fixture environment did not load " \
+                             "puppet/manifests/site.pp.\n" \
+                             "FIRST SUSPECT: an environment.conf under spec/fixtures/production/. " \
+                             "Puppet's DEFAULT `manifest` setting already points at the " \
+                             "environment's manifests/ directory, and overriding it (or setting a " \
+                             "modulepath that drops $basemodulepath) defeats that resolution while " \
+                             "still compiling 'successfully'. The working layout is plain " \
+                             "spec/fixtures/production/manifests/site.pp with NO environment.conf."
   end
 
   describe 'nginx package' do
@@ -145,10 +149,11 @@ describe 'static-site node', type: :host do
       # unescaped, Puppet parses `$uri` as a variable named 'uri', and
       # evaluation dies with "Unknown variable: 'uri'".
       #
-      # If the escape switch regresses, compilation raises. If the backslash is
-      # instead left in the output, nginx gets a broken `\$uri` directive and
-      # fails its config test on the host. This asserts the exact literal text
-      # nginx must receive.
+      # Verified against a real compiled catalog: the rendered content contains
+      # `try_files $uri $uri/ /index.html;` with a literal dollar and no
+      # backslash. If the escape switch regresses, compilation raises; if the
+      # backslash survives into the output, nginx gets a broken directive and
+      # fails its config test on the host.
       is_expected.to contain_file(vhost)
         .with_content(%r{try_files \$uri \$uri/ /index\.html;})
       is_expected.to contain_file(vhost).without_content(%r{\\\$uri})
