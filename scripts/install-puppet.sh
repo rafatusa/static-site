@@ -17,6 +17,11 @@ if [ -x "$PUPPET_BIN" ]; then
   exit 0
 fi
 
+# Derive the release codename from the host rather than hardcoding it, so the
+# same script works on the runner and on the instance even when their Ubuntu
+# releases differ.
+#
+# shellcheck disable=SC1091  # /etc/os-release exists at runtime, not at lint time
 CODENAME="$(. /etc/os-release && echo "$VERSION_CODENAME")"
 RELEASE_DEB="puppet8-release-${CODENAME}.deb"
 
