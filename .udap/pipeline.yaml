@@ -95,8 +95,13 @@ stages:
       # sudo is REQUIRED — /opt/puppetlabs is root-owned, and an unprivileged
       # `gem install` dies with Gem::FilePermissionError before installing
       # anything (same root cause as the lint stage's puppet-lint install).
+      #
+      # PIN the major version. rspec-puppet 4 REMOVED `manifest_dir=` and
+      # `manifest=`; spec/spec_helper.rb is written against the 5.x
+      # environmentpath API. An unpinned install would silently move to 6.x
+      # and break the harness again on a future run.
       sudo /opt/puppetlabs/puppet/bin/gem install --no-document \
-        rspec-puppet rspec puppetlabs_spec_helper
+        'rspec-puppet:~> 5.0' rspec
   - name: Run Puppet unit tests with coverage
     run: |
       # rspec-puppet compiles the catalog in-process and asserts on the
@@ -108,12 +113,6 @@ stages:
       # -E preserves the environment; the binary path is absolute regardless.
       sudo -E /opt/puppetlabs/puppet/bin/ruby \
         /opt/puppetlabs/puppet/bin/rspec --format documentation
-  - name: Publish coverage report
-    uses: actions/upload-artifact@v4
-    with:
-      name: puppet-coverage
-      path: coverage/
-      if-no-files-found: warn
 - id: security
   kind: security
   needs:

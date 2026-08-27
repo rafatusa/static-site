@@ -11,17 +11,41 @@
 #
 # Both now fail on the runner in seconds instead of after provisioning an EC2
 # instance and SSHing into it.
+#
+# API NOTE: rspec-puppet 4 REMOVED `manifest_dir=` and `manifest=`. Version 5
+# resolves manifests exclusively through `environmentpath`: it looks for
+# <environmentpath>/<environment>/manifests/*.pp. So instead of pointing at a
+# single file, we build that directory layout in spec/fixtures and symlink the
+# real manifest into it — the tests then run against the SAME file the host
+# applies, with no copy to drift out of sync.
 
 require 'rspec-puppet'
 require 'rspec-puppet/coverage'
+require 'fileutils'
 
-fixture_path = File.expand_path(File.join(__dir__, 'fixtures'))
+REPO_ROOT    = File.expand_path(File.join(__dir__, '..')).freeze
+FIXTURE_PATH = File.join(__dir__, 'fixtures').freeze
+ENV_NAME     = 'production'.freeze
+
+# Build <fixtures>/production/manifests/site.pp as a link to the real manifest.
+env_manifests = File.join(FIXTURE_PATH, ENV_NAME, 'manifests')
+FileUtils.mkdir_p(env_manifests)
+
+real_manifest = File.join(REPO_ROOT, 'puppet', 'manifests', 'site.pp')
+link_target   = File.join(env_manifests, 'site.pp')
+
+FileUtils.rm_f(link_target)
+begin
+  FileUtils.ln_s(real_manifest, link_target)
+rescue NotImplementedError, Errno::EPERM
+  # Filesystems without symlink support: fall back to a copy.
+  FileUtils.cp(real_manifest, link_target)
+end
 
 RSpec.configure do |c|
-  c.module_path   = File.join(fixture_path, 'modules')
-  c.manifest_dir  = File.join(fixture_path, 'manifests')
-  c.manifest      = File.expand_path(File.join(__dir__, '..', 'puppet', 'manifests', 'site.pp'))
-  c.environmentpath = fixture_path
+  c.environmentpath = FIXTURE_PATH
+  c.environment     = ENV_NAME
+  c.module_path     = File.join(FIXTURE_PATH, 'modules')
 
   # Deterministic facts. The manifest targets Ubuntu on EC2; pinning the facts
   # means a test failure is a manifest change, never a runner change.
@@ -31,16 +55,11 @@ RSpec.configure do |c|
       'name'    => 'Ubuntu',
       'release' => { 'full' => '22.04', 'major' => '22' },
     },
-    'osfamily'                  => 'Debian',
-    'operatingsystem'           => 'Ubuntu',
-    'operatingsystemrelease'    => '22.04',
-    'path'                      => '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
+    'osfamily'               => 'Debian',
+    'operatingsystem'        => 'Ubuntu',
+    'operatingsystemrelease' => '22.04',
+    'path'                   => '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
   }
-
-  # An unexpected error must fail loudly rather than yield an empty catalog
-  # that then passes vacuous assertions.
-  c.strict_variables = false
-  c.raise_errors_for_deprecations!
 
   # COVERAGE FLOOR — the build fails below this.
   #

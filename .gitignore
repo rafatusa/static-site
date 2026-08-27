@@ -1,2 +1,10 @@
 .terraform/
-*.tfstate*
+*.tfstate
+*.tfstate.*
+crash.log
+.terraform.lock.hcl
+
+# rspec-puppet builds the environment layout under spec/fixtures at runtime
+# (see spec/spec_helper.rb) — the manifest is linked in, never copied into git.
+spec/fixtures/production/
+coverage/

@@ -74,8 +74,12 @@ jobs:
         # the SAME puppet 8 that lint parses and the host applies.\n#\n# sudo is REQUIRED\
         \ \u2014 /opt/puppetlabs is root-owned, and an unprivileged\n# `gem install`\
         \ dies with Gem::FilePermissionError before installing\n# anything (same root\
-        \ cause as the lint stage's puppet-lint install).\nsudo /opt/puppetlabs/puppet/bin/gem\
-        \ install --no-document \\\n  rspec-puppet rspec puppetlabs_spec_helper\n"
+        \ cause as the lint stage's puppet-lint install).\n#\n# PIN the major version.\
+        \ rspec-puppet 4 REMOVED `manifest_dir=` and\n# `manifest=`; spec/spec_helper.rb\
+        \ is written against the 5.x\n# environmentpath API. An unpinned install would\
+        \ silently move to 6.x\n# and break the harness again on a future run.\nsudo\
+        \ /opt/puppetlabs/puppet/bin/gem install --no-document \\\n  'rspec-puppet:~>\
+        \ 5.0' rspec\n"
     - name: Run Puppet unit tests with coverage
       run: "# rspec-puppet compiles the catalog in-process and asserts on the\n# resulting\
         \ resources. It fails the build below the coverage floor\n# configured in\
@@ -84,12 +88,6 @@ jobs:
         \ above, so the same interpreter must load them.\n# -E preserves the environment;\
         \ the binary path is absolute regardless.\nsudo -E /opt/puppetlabs/puppet/bin/ruby\
         \ \\\n  /opt/puppetlabs/puppet/bin/rspec --format documentation\n"
-    - name: Publish coverage report
-      uses: actions/upload-artifact@v4
-      with:
-        name: puppet-coverage
-        path: coverage/
-        if-no-files-found: warn
   security:
     runs-on: ubuntu-latest
     needs:
